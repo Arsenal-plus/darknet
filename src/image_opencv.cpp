@@ -17,6 +17,12 @@
 #include <chrono>
 #include <ctime> 
 
+// For beep
+#ifdef WIN32
+#include <windows.h>
+#define BEEP Beep(5000, 100);
+#endif
+
 #include <opencv2/core/version.hpp>
 #include <opencv2/imgproc/imgproc.hpp>
 #include <opencv2/opencv.hpp>
@@ -943,6 +949,9 @@ extern "C" void save_orig_image(cv::Mat *image, char *corefolder, double timer) 
 		SAVE_ORIG_IMAGE_DEBUG_PRINT && printf("save_orig_image::thread - saving image: %s\n", image_path);
 		// Save image
 		save_mat_jpg(copied_image, image_path); 
+		
+		// Do beep
+		BEEP;
 	};
 	// Create thread
 	SAVE_ORIG_IMAGE_DEBUG_PRINT && printf("save_orig_image - creating thread for image saving\n");
