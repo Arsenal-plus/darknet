@@ -12,6 +12,10 @@
 #include <fstream>
 #include <algorithm>
 #include <atomic>
+#include <filesystem>
+#include <thread>
+#include <chrono>
+#include <ctime> 
 
 #include <opencv2/core/version.hpp>
 #include <opencv2/imgproc/imgproc.hpp>
@@ -891,6 +895,64 @@ extern "C" void save_cv_jpg(mat_cv *img_src, const char *name)
 }
 // ----------------------------------------
 
+// ====================================================================
+// Save original image in case of any detections (with timer)
+// ====================================================================
+
+#define SAVE_ORIG_IMAGE_MAX_IMAGE_PATH 1024
+#define SAVE_ORIG_IMAGE_DEBUG_PRINT 1
+char images_corefolder[128] = "C:\\Detected";
+double save_orig_image_timer = 10000.0;
+
+extern "C" void save_orig_image(cv::Mat *image, char *corefolder, double timer) {
+	/** Get the countdown between calls **/
+	SAVE_ORIG_IMAGE_DEBUG_PRINT && printf("save_orig_image - enter\n");
+	static bool first_pass = true;
+	static std::chrono::time_point<std::chrono::system_clock> prev_time = std::chrono::system_clock::now();
+	std::chrono::time_point<std::chrono::system_clock> cur_time = std::chrono::system_clock::now();
+	double time_passed = std::chrono::duration_cast<std::chrono::milliseconds>(cur_time - prev_time).count();
+	SAVE_ORIG_IMAGE_DEBUG_PRINT && printf("save_orig_image - time delta: %f\n", time_passed);
+	if (!first_pass && time_passed <= timer) 
+		return;
+	prev_time = cur_time;
+	first_pass = false;
+	SAVE_ORIG_IMAGE_DEBUG_PRINT && printf("save_orig_image - passed timers\n");
+	
+	
+	/** Copy image, create lambda function with image save and run it in a thread **/
+	cv::Mat copied_image = image->clone();
+	auto lfunc = [cur_time, copied_image, corefolder] {
+		std::time_t now_tt = std::chrono::system_clock::to_time_t(cur_time);
+		/** Create all necessary folders **/
+		// Generate folder's name and path
+		char folder_name[7], folder_path[SAVE_ORIG_IMAGE_MAX_IMAGE_PATH];
+		std::strftime(folder_name, sizeof(folder_name), "%d%m%y", std::localtime(&now_tt));
+		sprintf(folder_path, "%s/%s", corefolder, folder_name);
+		// Create folder tree
+		SAVE_ORIG_IMAGE_DEBUG_PRINT && printf("save_orig_image::thread - creating directory tree: %s\n", folder_path);
+		std::filesystem::create_directories(folder_path);
+		
+		/** Save original image to the folder **/
+		// Generate main part of image name
+		char image_name[7], image_path[SAVE_ORIG_IMAGE_MAX_IMAGE_PATH];
+		std::strftime(image_name, sizeof(image_name), "%H%M%S", std::localtime(&now_tt));
+		// Add epoch time in ms for below-one-second image savings distinguish
+		long long int since_epoch_time = std::chrono::duration_cast<std::chrono::milliseconds>(cur_time.time_since_epoch()).count();
+		// Generate image path
+		sprintf(image_path, "%s/%s-%lld.jpg", folder_path, image_name, since_epoch_time);
+		SAVE_ORIG_IMAGE_DEBUG_PRINT && printf("save_orig_image::thread - saving image: %s\n", image_path);
+		// Save image
+		save_mat_jpg(copied_image, image_path); 
+	};
+	// Create thread
+	SAVE_ORIG_IMAGE_DEBUG_PRINT && printf("save_orig_image - creating thread for image saving\n");
+	std::thread th(lfunc);
+	th.detach();
+	
+	time_passed = std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::system_clock::now() - cur_time).count();
+	SAVE_ORIG_IMAGE_DEBUG_PRINT && printf("save_orig_image - exit. Bench (in nanoseconds): %f\n", time_passed);
+	
+}
 
 // ====================================================================
 // Draw Detection
@@ -904,6 +966,7 @@ extern "C" void draw_detections_cv_v3(mat_cv* mat, detection *dets, int num, flo
         static int frame_id = 0;
         frame_id++;
 
+		bool image_saved = false; // Passing the thresh on the first box is sufficient to save the image
         for (i = 0; i < num; ++i) {
             char labelstr[4096] = { 0 };
             int class_id = -1;
@@ -911,6 +974,10 @@ extern "C" void draw_detections_cv_v3(mat_cv* mat, detection *dets, int num, flo
                 int show = strncmp(names[j], "dont_show", 9);
                 if (dets[i].prob[j] > thresh && show) {
                     if (class_id < 0) {
+						if (!image_saved) {
+							save_orig_image(show_img, images_corefolder, save_orig_image_timer);
+							image_saved = true;
+						}
                         strcat(labelstr, names[j]);
                         class_id = j;
                         char buff[20];
