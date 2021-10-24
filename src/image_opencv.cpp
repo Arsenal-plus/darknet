@@ -1,50 +1,5 @@
 #include "image_opencv.h"
-
-
-//  global compilation flag configuring windows sdk headers
-//  preventing inclusion of min and max macros clashing with <limits>
-#define NOMINMAX 1
-
-//  override byte to prevent clashes with <cstddef>
-#define byte win_byte_override
-
-#include <Windows.h> // gdi plus requires Windows.h
-// ...includes for other windows header that may use byte...
-
-//  Define min max macros required by GDI+ headers.
-#ifndef max
-#define max(a,b) (((a) > (b)) ? (a) : (b))
-#else
-#error max macro is already defined
-#endif
-#ifndef min
-#define min(a,b) (((a) < (b)) ? (a) : (b))
-#else
-#error min macro is already defined
-#endif
-
-#include <gdiplus.h>
-
-//  Undefine min max macros so they won't collide with <limits> header content.
-#undef min
-#undef max
-
-//  Undefine byte macros so it won't collide with <cstddef> header content.
-#undef byte
-
-#include <windows.h>
 #include <iostream>
-#include <Tchar.h>
-
-#include <objidl.h>
-#include <gdiplus.h>
-#include <vector>
-using namespace Gdiplus;
-
-#pragma comment (lib,"Gdiplus.lib")
-
-#pragma warning(disable : 4996) //_CRT_SECURE_NO_WARNINGS
-
 
 #ifdef OPENCV
 #include "utils.h"
@@ -940,65 +895,6 @@ extern "C" void save_cv_jpg(mat_cv *img_src, const char *name)
 // ====================================================================
 // Draw Detection
 // ====================================================================
-
-//---------------------custom----------------------------------------
-HRESULT GetGdiplusEncoderClsid(const std::wstring& format, GUID* pGuid)
-{
-    HRESULT hr = S_OK;
-    UINT  nEncoders = 0;          // number of image encoders
-    UINT  nSize = 0;              // size of the image encoder array in bytes
-    std::vector<BYTE> spData;
-    Gdiplus::ImageCodecInfo* pImageCodecInfo = NULL;
-    Gdiplus::Status status;
-    bool found = false;
-
-    if (format.empty() || !pGuid)
-    {
-        hr = E_INVALIDARG;
-    }
-
-    if (SUCCEEDED(hr))
-    {
-        *pGuid = GUID_NULL;
-        status = Gdiplus::GetImageEncodersSize(&nEncoders, &nSize);
-
-        if ((status != Gdiplus::Ok) || (nSize == 0))
-        {
-            hr = E_FAIL;
-        }
-    }
-
-    if (SUCCEEDED(hr))
-    {
-
-        spData.resize(nSize);
-        pImageCodecInfo = (Gdiplus::ImageCodecInfo*)&spData.front();
-        status = Gdiplus::GetImageEncoders(nEncoders, nSize, pImageCodecInfo);
-
-        if (status != Gdiplus::Ok)
-        {
-            hr = E_FAIL;
-        }
-    }
-
-    if (SUCCEEDED(hr))
-    {
-        for (UINT j = 0; j < nEncoders && !found; j++)
-        {
-            if (pImageCodecInfo[j].MimeType == format)
-            {
-                *pGuid = pImageCodecInfo[j].Clsid;
-                found = true;
-            }
-        }
-
-        hr = found ? S_OK : E_FAIL;
-    }
-
-    return hr;
-}
-
-//---------------------------------------------------------------------
 extern "C" void draw_detections_cv_v3(mat_cv* mat, detection *dets, int num, float thresh, char **names, image **alphabet, int classes, int ext_output)
 {
     try {
@@ -1025,74 +921,6 @@ extern "C" void draw_detections_cv_v3(mat_cv* mat, detection *dets, int num, flo
                         sprintf(buff, " (%2.0f%%)", dets[i].prob[j] * 100);
                         strcat(labelstr, buff);
                         printf("%s: %.0f%% ", names[j], dets[i].prob[j] * 100);
-
-
-                        ////////////////////////////////////////////////////////////////
-                        Beep(5000, 100);
-                        RECT rc;
-                        HWND hwnd = FindWindow(NULL, _T("Demo"));
-
-                        GetClientRect(hwnd, &rc);
-
-                        //create
-                        HDC hdcScreen = GetDC(NULL);
-                        HDC hdc = CreateCompatibleDC(hdcScreen);
-                        HBITMAP hbmp = CreateCompatibleBitmap(hdcScreen,
-                            rc.right - rc.left, rc.bottom - rc.top);
-                        SelectObject(hdc, hbmp);
-
-                        //Print to memory hdc
-                        PrintWindow(hwnd, hdc, PW_CLIENTONLY);
-
-                        time_t rawtime;
-                        struct tm* timeinfo;
-                        char buffer[80];
-                        time(&rawtime);
-                        timeinfo = localtime(&rawtime);
-                        char path[50] = "C:\\Detected\\";
-                        strftime(buffer, 80, "%d-%m-%Y %I_%M_%S", timeinfo);
-                        char res[5] = ".png";
-                        char* name = strcat(strcat(path, buffer), res);
-                        const size_t cSize = strlen(name) + 1;
-                        std::wstring wc(cSize, '#');
-                        mbstowcs(&wc[0], name, cSize);
-                        LPCTSTR namrptr = (LPCTSTR)wc.c_str();
-
-                        wprintf(wc.c_str());
-
-                        Gdiplus::GdiplusStartupInput input;
-                        Gdiplus::GdiplusStartupOutput output;
-                        ULONG dwToken;
-                        Gdiplus::Status status = Gdiplus::Ok;
-
-                        Gdiplus::GdiplusStartupInput gdiplusStartupInput;
-                        ULONG_PTR gdiplusToken;
-                        GdiplusStartup(&gdiplusToken, &gdiplusStartupInput, NULL);
-
-                        GUID guidBmp = {};
-                        GUID guidJpeg = {};
-                        GUID guidGif = {};
-                        GUID guidTiff = {};
-                        GUID guidPng = {};
-
-                        GetGdiplusEncoderClsid(L"image/bmp", &guidBmp);
-                        GetGdiplusEncoderClsid(L"image/jpeg", &guidJpeg);
-                        GetGdiplusEncoderClsid(L"image/gif", &guidGif);
-                        GetGdiplusEncoderClsid(L"image/tiff", &guidTiff);
-                        GetGdiplusEncoderClsid(L"image/png", &guidPng);
-
-
-                        Gdiplus::Bitmap* bitmap = new Gdiplus::Bitmap(hbmp, NULL);
-                        HRESULT a = bitmap->Save(wc.c_str(), &guidPng);
-
-
-                        //release
-                        DeleteDC(hdc);
-                        DeleteObject(hbmp);
-                        ReleaseDC(NULL, hdcScreen);
-
-                        ////////////////////////////////////////////////////////////////
-
                         if (dets[i].track_id) printf("(track = %d, sim = %f) ", dets[i].track_id, dets[i].sim);
                     }
                     else {
