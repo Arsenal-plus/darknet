@@ -17,10 +17,10 @@
 #include <chrono>
 #include <ctime> 
 
-// For beep
+
 #ifdef WIN32
 #include <windows.h>
-#define BEEP Beep(5000, 100);
+#include <winuser.h>
 #endif
 
 #include <opencv2/core/version.hpp>
@@ -927,7 +927,8 @@ extern "C" void save_orig_image(cv::Mat *image, char *corefolder, double timer) 
 	
 	/** Copy image, create lambda function with image save and run it in a thread **/
 	cv::Mat copied_image = image->clone();
-	auto lfunc = [cur_time, copied_image, corefolder] {
+	auto lfunc = [cur_time, copied_image, corefolder] {		
+
 		std::time_t now_tt = std::chrono::system_clock::to_time_t(cur_time);
 		/** Create all necessary folders **/
 		// Generate folder's name and path
@@ -951,13 +952,32 @@ extern "C" void save_orig_image(cv::Mat *image, char *corefolder, double timer) 
 		save_mat_jpg(copied_image, image_path); 
 		
 		// Do beep
-		BEEP;
+#ifdef WIN32
+		Beep(5000, 100);
+#endif
+
+		// Change window focus
+#ifdef WIN32
+		HWND handle = FindWindowA(NULL, "Demo"); // Not that good as the name of our window can change in different place
+		SAVE_ORIG_IMAGE_DEBUG_PRINT && printf("save_orig_image - window handle: %d\n", (int)handle);
+		SetActiveWindow(handle);
+		SetForegroundWindow(handle);
+		// Implemented the most stable version. Not breaking Z_ORDER between processes in Windows OS! Can only send a request to the system
+		// To do this, use scripting hooks or something like that
+		BringWindowToTop(handle);
+		// Other version 1: always topmost window
+		// SetWindowPos(that_window_handle, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
+		// Other version 2: force maximized. Can vary with SW_HIDE to be more annoying. Still cannot break Z_ORDER of current Windowses
+		// ShowWindow(handle, SW_SHOWMAXIMIZED);
+		
+		
+#endif 
 	};
 	// Create thread
 	SAVE_ORIG_IMAGE_DEBUG_PRINT && printf("save_orig_image - creating thread for image saving\n");
 	std::thread th(lfunc);
 	th.detach();
-	
+
 	time_passed = std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::system_clock::now() - cur_time).count();
 	SAVE_ORIG_IMAGE_DEBUG_PRINT && printf("save_orig_image - exit. Bench (in nanoseconds): %f\n", time_passed);
 	
