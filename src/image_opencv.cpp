@@ -1009,7 +1009,7 @@ extern "C" void save_orig_image(cv::Mat *image, char *corefolder, double glob_ti
 		}
 		
 		// Send POST request
-		SAVE_ORIG_IMAGE_DEBUG_PRINT && printf("save_orig_image::thread - sending POST request");
+		SAVE_ORIG_IMAGE_DEBUG_PRINT && printf("save_orig_image::thread - sending POST request\n");
 		WinExec("python send_post.py", SW_HIDE);
 	};
 	// Create thread
