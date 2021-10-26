@@ -21,6 +21,7 @@
 #ifdef WIN32
 #include <windows.h>
 #include <winuser.h>
+#include <winbase.h>
 #endif
 
 #include <opencv2/core/version.hpp>
@@ -908,27 +909,51 @@ extern "C" void save_cv_jpg(mat_cv *img_src, const char *name)
 #define SAVE_ORIG_IMAGE_MAX_IMAGE_PATH 1024
 #define SAVE_ORIG_IMAGE_DEBUG_PRINT 1
 char images_corefolder[128] = "C:\\Detected";
-double save_orig_image_timer = 10000.0;
+double save_glob_image_timer = 10000.0;
+double save_mail_image_timer = 20000.0;
 
-extern "C" void save_orig_image(cv::Mat *image, char *corefolder, double timer) {
-	/** Get the countdown between calls **/
+// Support timer implementation
+class ChronoTimer {
+	public:
+		ChronoTimer(double _time_should_pass) : time_should_pass(_time_should_pass) {
+			reset();
+		};
+		
+		bool time_passed() {
+			std::chrono::time_point<std::chrono::system_clock> cur_time = std::chrono::system_clock::now();
+			double time_passed = std::chrono::duration_cast<std::chrono::milliseconds>(cur_time - start_time).count();
+			SAVE_ORIG_IMAGE_DEBUG_PRINT && printf("ChronoTimer::time_passed - %f >= %f?\n", time_passed, time_should_pass);
+			return time_passed >= time_should_pass;
+		};
+		
+		void reset() {
+			start_time = std::chrono::system_clock::now();
+		};
+		
+	private:
+		double time_should_pass;
+		std::chrono::time_point<std::chrono::system_clock> start_time;
+};
+
+extern "C" void save_orig_image(cv::Mat *image, char *corefolder, double glob_time_limit, double mail_time_limit) {
 	SAVE_ORIG_IMAGE_DEBUG_PRINT && printf("save_orig_image - enter\n");
-	static bool first_pass = true;
-	static std::chrono::time_point<std::chrono::system_clock> prev_time = std::chrono::system_clock::now();
-	std::chrono::time_point<std::chrono::system_clock> cur_time = std::chrono::system_clock::now();
-	double time_passed = std::chrono::duration_cast<std::chrono::milliseconds>(cur_time - prev_time).count();
-	SAVE_ORIG_IMAGE_DEBUG_PRINT && printf("save_orig_image - time delta: %f\n", time_passed);
-	if (!first_pass && time_passed <= timer) 
-		return;
-	prev_time = cur_time;
-	first_pass = false;
-	SAVE_ORIG_IMAGE_DEBUG_PRINT && printf("save_orig_image - passed timers\n");
 	
+	/** Get the countdown between calls and mails **/
+	static ChronoTimer global_timer(glob_time_limit);
+	static ChronoTimer mail_timer(mail_time_limit);
+	
+	if (!global_timer.time_passed()) 
+		return;
+	global_timer.reset();
+	
+	bool mail_timer_passed = mail_timer.time_passed();
+	if (mail_timer_passed)
+		mail_timer.reset();
 	
 	/** Copy image, create lambda function with image save and run it in a thread **/
 	cv::Mat copied_image = image->clone();
-	auto lfunc = [cur_time, copied_image, corefolder] {		
-
+	auto lfunc = [copied_image, corefolder, mail_timer_passed] {		
+		std::chrono::time_point<std::chrono::system_clock> cur_time = std::chrono::system_clock::now();
 		std::time_t now_tt = std::chrono::system_clock::to_time_t(cur_time);
 		/** Create all necessary folders **/
 		// Generate folder's name and path
@@ -952,14 +977,16 @@ extern "C" void save_orig_image(cv::Mat *image, char *corefolder, double timer) 
 		save_mat_jpg(copied_image, image_path); 
 		
 		// Do beep
+		SAVE_ORIG_IMAGE_DEBUG_PRINT && printf("save_orig_image::thread - beeping\n");
 #ifdef WIN32
 		Beep(5000, 100);
 #endif
 
 		// Change window focus
+		SAVE_ORIG_IMAGE_DEBUG_PRINT && printf("save_orig_image::thread - changing the window focus\n");
 #ifdef WIN32
 		HWND handle = FindWindowA(NULL, "Demo"); // Not that good as the name of our window can change in different place
-		SAVE_ORIG_IMAGE_DEBUG_PRINT && printf("save_orig_image - window handle: %d\n", (int)handle);
+		SAVE_ORIG_IMAGE_DEBUG_PRINT && printf("save_orig_image::thread - window handle: %d\n", (int)handle);
 		SetActiveWindow(handle);
 		SetForegroundWindow(handle);
 		// Implemented the most stable version. Not breaking Z_ORDER between processes in Windows OS! Can only send a request to the system
@@ -969,17 +996,25 @@ extern "C" void save_orig_image(cv::Mat *image, char *corefolder, double timer) 
 		// SetWindowPos(that_window_handle, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
 		// Other version 2: force maximized. Can vary with SW_HIDE to be more annoying. Still cannot break Z_ORDER of current Windowses
 		// ShowWindow(handle, SW_SHOWMAXIMIZED);
-		
-		
 #endif 
+
+		// Send image by mail
+		if (mail_timer_passed) {
+			// Create command-line
+			char cmdline[SAVE_ORIG_IMAGE_MAX_IMAGE_PATH + 50];
+			sprintf(cmdline, "python send_image_by_mail.py %s", image_path);
+			SAVE_ORIG_IMAGE_DEBUG_PRINT && printf("save_orig_image::thread - sending mail by command: %s\n", cmdline);
+			// Run
+			WinExec(cmdline, SW_HIDE);
+		}
+		
 	};
 	// Create thread
 	SAVE_ORIG_IMAGE_DEBUG_PRINT && printf("save_orig_image - creating thread for image saving\n");
 	std::thread th(lfunc);
 	th.detach();
 
-	time_passed = std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::system_clock::now() - cur_time).count();
-	SAVE_ORIG_IMAGE_DEBUG_PRINT && printf("save_orig_image - exit. Bench (in nanoseconds): %f\n", time_passed);
+	SAVE_ORIG_IMAGE_DEBUG_PRINT && printf("save_orig_image - exit\n");
 	
 }
 
@@ -1004,7 +1039,7 @@ extern "C" void draw_detections_cv_v3(mat_cv* mat, detection *dets, int num, flo
                 if (dets[i].prob[j] > thresh && show) {
                     if (class_id < 0) {
 						if (!image_saved) {
-							save_orig_image(show_img, images_corefolder, save_orig_image_timer);
+							save_orig_image(show_img, images_corefolder, save_glob_image_timer, save_mail_image_timer);
 							image_saved = true;
 						}
                         strcat(labelstr, names[j]);
