@@ -906,12 +906,6 @@ extern "C" void save_cv_jpg(mat_cv *img_src, const char *name)
 // Save original image in case of any detections (with timer)
 // ====================================================================
 
-#define SAVE_ORIG_IMAGE_MAX_IMAGE_PATH 1024
-#define SAVE_ORIG_IMAGE_DEBUG_PRINT 1
-char images_corefolder[128] = "C:\\Detected";
-double save_glob_image_timer = 10000.0;
-double save_mail_image_timer = 20000.0;
-
 // Support timer implementation
 class ChronoTimer {
 	public:
@@ -922,7 +916,7 @@ class ChronoTimer {
 		bool time_passed() {
 			std::chrono::time_point<std::chrono::system_clock> cur_time = std::chrono::system_clock::now();
 			double time_passed = std::chrono::duration_cast<std::chrono::milliseconds>(cur_time - start_time).count();
-			SAVE_ORIG_IMAGE_DEBUG_PRINT && printf("ChronoTimer::time_passed - %f >= %f?\n", time_passed, time_should_pass);
+			CS_DEBUG && printf("ChronoTimer::time_passed - %f >= %f?\n", time_passed, time_should_pass);
 			return time_passed >= time_should_pass;
 		};
 		
@@ -935,8 +929,8 @@ class ChronoTimer {
 		std::chrono::time_point<std::chrono::system_clock> start_time;
 };
 
-extern "C" void save_orig_image(cv::Mat *image, char *corefolder, double glob_time_limit, double mail_time_limit) {
-	SAVE_ORIG_IMAGE_DEBUG_PRINT && printf("save_orig_image - enter\n");
+extern "C" void custom_steps(cv::Mat *image, char *corefolder, double glob_time_limit, double mail_time_limit, int save_images, int do_beep, int focus_window, int send_mail, int send_post) {
+	CS_DEBUG && printf("custom_steps - enter\n");
 	
 	/** Get the countdown between calls and mails **/
 	static ChronoTimer global_timer(glob_time_limit);
@@ -946,85 +940,101 @@ extern "C" void save_orig_image(cv::Mat *image, char *corefolder, double glob_ti
 		return;
 	global_timer.reset();
 	
-	bool mail_timer_passed = mail_timer.time_passed();
+	int mail_timer_passed = mail_timer.time_passed();
 	if (mail_timer_passed)
 		mail_timer.reset();
 	
 	/** Copy image, create lambda function with image save and run it in a thread **/
 	cv::Mat copied_image = image->clone();
-	auto lfunc = [copied_image, corefolder, mail_timer_passed] {		
-		std::chrono::time_point<std::chrono::system_clock> cur_time = std::chrono::system_clock::now();
-		std::time_t now_tt = std::chrono::system_clock::to_time_t(cur_time);
-		/** Create all necessary folders **/
-		// Generate folder's name and path
-		char folder_name[7], folder_path[SAVE_ORIG_IMAGE_MAX_IMAGE_PATH];
-		std::strftime(folder_name, sizeof(folder_name), "%d%m%y", std::localtime(&now_tt));
-		sprintf(folder_path, "%s/%s", corefolder, folder_name);
-		// Create folder tree
-		SAVE_ORIG_IMAGE_DEBUG_PRINT && printf("save_orig_image::thread - creating directory tree: %s\n", folder_path);
-		std::filesystem::create_directories(folder_path);
-		
-		/** Save original image to the folder **/
-		// Generate main part of image name
-		char image_name[7], image_path[SAVE_ORIG_IMAGE_MAX_IMAGE_PATH];
-		std::strftime(image_name, sizeof(image_name), "%H%M%S", std::localtime(&now_tt));
-		// Add epoch time in ms for below-one-second image savings distinguish
-		long long int since_epoch_time = std::chrono::duration_cast<std::chrono::milliseconds>(cur_time.time_since_epoch()).count();
-		// Generate image path
-		sprintf(image_path, "%s/%s-%lld.jpg", folder_path, image_name, since_epoch_time);
-		SAVE_ORIG_IMAGE_DEBUG_PRINT && printf("save_orig_image::thread - saving image: %s\n", image_path);
-		// Save image
-		save_mat_jpg(copied_image, image_path); 
+	auto lfunc = [copied_image, corefolder, mail_timer_passed, save_images, do_beep, focus_window, send_mail, send_post] {		
+		if (save_images) {
+			std::chrono::time_point<std::chrono::system_clock> cur_time = std::chrono::system_clock::now();
+			std::time_t now_tt = std::chrono::system_clock::to_time_t(cur_time);
+			/** Create all necessary folders **/
+			// Generate folder's name and path
+			char folder_name[7], folder_path[CS_MAXPATH];
+			std::strftime(folder_name, sizeof(folder_name), "%d%m%y", std::localtime(&now_tt));
+			sprintf(folder_path, "%s/%s", corefolder, folder_name);
+			// Create folder tree
+			CS_DEBUG && printf("custom_steps::thread - creating directory tree: %s\n", folder_path);
+			std::filesystem::create_directories(folder_path);
+			
+			/** Save original image to the folder **/
+			// Generate main part of image name
+			char image_name[7], image_path[CS_MAXPATH];
+			std::strftime(image_name, sizeof(image_name), "%H%M%S", std::localtime(&now_tt));
+			// Add epoch time in ms for below-one-second image savings distinguish
+			long long int since_epoch_time = std::chrono::duration_cast<std::chrono::milliseconds>(cur_time.time_since_epoch()).count();
+			// Generate image path
+			sprintf(image_path, "%s/%s-%lld.jpg", folder_path, image_name, since_epoch_time);
+			CS_DEBUG && printf("custom_steps::thread - saving image: %s\n", image_path);
+			// Save image
+			save_mat_jpg(copied_image, image_path); 
+			
+			// Send image by mail
+			if (send_mail) {
+				if (mail_timer_passed) {
+#ifdef WIN32
+					// Create command-line
+					char cmdline[CS_MAXPATH + 50];
+					sprintf(cmdline, "python send_image_by_mail.py %s", image_path);
+					CS_DEBUG && printf("custom_steps::thread - sending mail by command: %s\n", cmdline);
+					// Run
+					WinExec(cmdline, SW_HIDE);
+#endif
+				}
+			}
+		}
 		
 		// Do beep
-		SAVE_ORIG_IMAGE_DEBUG_PRINT && printf("save_orig_image::thread - beeping\n");
+		if (do_beep) {
+			CS_DEBUG && printf("custom_steps::thread - beeping\n");
 #ifdef WIN32
-		Beep(5000, 100);
+			Beep(5000, 100);
 #endif
-
+		}
+		
 		// Change window focus
-		SAVE_ORIG_IMAGE_DEBUG_PRINT && printf("save_orig_image::thread - changing the window focus\n");
+		if (focus_window) {
+			CS_DEBUG && printf("custom_steps::thread - changing the window focus\n");
 #ifdef WIN32
-		HWND handle = FindWindowA(NULL, "Demo"); // Not that good as the name of our window can change in different place
-		SAVE_ORIG_IMAGE_DEBUG_PRINT && printf("save_orig_image::thread - window handle: %d\n", (int)handle);
-		SetActiveWindow(handle);
-		SetForegroundWindow(handle);
-		// Implemented the most stable version. Not breaking Z_ORDER between processes in Windows OS! Can only send a request to the system
-		// To do this, use scripting hooks or something like that
-		BringWindowToTop(handle);
-		// Other version 1: always topmost window
-		// SetWindowPos(that_window_handle, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
-		// Other version 2: force maximized. Can vary with SW_HIDE to be more annoying. Still cannot break Z_ORDER of current Windowses
-		// ShowWindow(handle, SW_SHOWMAXIMIZED);
+			HWND handle = FindWindowA(NULL, "Demo"); // Not that good as the name of our window can change in different place
+			CS_DEBUG && printf("custom_steps::thread - window handle: %d\n", (int)handle);
+			SetActiveWindow(handle);
+			SetForegroundWindow(handle);
+			// Implemented the most stable version. Not breaking Z_ORDER between processes in Windows OS! Can only send a request to the system
+			// To do this, use scripting hooks or something like that
+			BringWindowToTop(handle);
+			// Other version 1: always topmost window
+			// SetWindowPos(that_window_handle, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
+			// Other version 2: force maximized. Can vary with SW_HIDE to be more annoying. Still cannot break Z_ORDER of current Windowses
+			// ShowWindow(handle, SW_SHOWMAXIMIZED);
 #endif 
-
-		// Send image by mail
-		if (mail_timer_passed) {
-			// Create command-line
-			char cmdline[SAVE_ORIG_IMAGE_MAX_IMAGE_PATH + 50];
-			sprintf(cmdline, "python send_image_by_mail.py %s", image_path);
-			SAVE_ORIG_IMAGE_DEBUG_PRINT && printf("save_orig_image::thread - sending mail by command: %s\n", cmdline);
-			// Run
-			WinExec(cmdline, SW_HIDE);
 		}
 		
 		// Send POST request
-		SAVE_ORIG_IMAGE_DEBUG_PRINT && printf("save_orig_image::thread - sending POST request\n");
-		WinExec("python send_post.py", SW_HIDE);
+		if (send_post) {
+			CS_DEBUG && printf("custom_steps::thread - sending POST request\n");
+#ifdef WIN32
+			WinExec("python send_post.py", SW_HIDE);
+#endif 
+		}
 	};
+	
 	// Create thread
-	SAVE_ORIG_IMAGE_DEBUG_PRINT && printf("save_orig_image - creating thread for image saving\n");
+	CS_DEBUG && printf("custom_steps - creating thread for image saving\n");
 	std::thread th(lfunc);
 	th.detach();
 
-	SAVE_ORIG_IMAGE_DEBUG_PRINT && printf("save_orig_image - exit\n");
+	CS_DEBUG && printf("custom_steps - exit\n");
 	
 }
 
 // ====================================================================
 // Draw Detection
 // ====================================================================
-extern "C" void draw_detections_cv_v3(mat_cv* mat, detection *dets, int num, float thresh, char **names, image **alphabet, int classes, int ext_output)
+extern "C" void draw_detections_cv_v3(mat_cv* mat, detection *dets, int num, float thresh, char **names, image **alphabet, int classes, int ext_output,
+                                      double gtimer, double mtimer, char *corefolder, int run_steps, int save_images, int do_beep, int focus_window, int send_mail, int send_post)
 {
     try {
         cv::Mat *show_img = (cv::Mat*)mat;
@@ -1033,7 +1043,7 @@ extern "C" void draw_detections_cv_v3(mat_cv* mat, detection *dets, int num, flo
         static int frame_id = 0;
         frame_id++;
 
-		bool image_saved = false; // Passing the thresh on the first box is sufficient to save the image
+		int steps_ran = 0; // Passing the thresh on the first box is sufficient to run the steps
         for (i = 0; i < num; ++i) {
             char labelstr[4096] = { 0 };
             int class_id = -1;
@@ -1041,9 +1051,9 @@ extern "C" void draw_detections_cv_v3(mat_cv* mat, detection *dets, int num, flo
                 int show = strncmp(names[j], "dont_show", 9);
                 if (dets[i].prob[j] > thresh && show) {
                     if (class_id < 0) {
-						if (!image_saved) {
-							save_orig_image(show_img, images_corefolder, save_glob_image_timer, save_mail_image_timer);
-							image_saved = true;
+						if (!steps_ran && run_steps) {
+							custom_steps(show_img, corefolder, gtimer, mtimer, save_images, do_beep, focus_window, send_mail, send_post);
+							steps_ran = true;
 						}
                         strcat(labelstr, names[j]);
                         class_id = j;
