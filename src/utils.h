@@ -112,6 +112,10 @@ bool is_live_stream(const char * path);
 #define max_val_cmp(a,b) (((a) > (b)) ? (a) : (b))
 #define min_val_cmp(a,b) (((a) < (b)) ? (a) : (b))
 
+// Defines for custom_steps function
+#define CS_MAXPATH 1024
+#define CS_DEBUG 1
+
 #ifdef __cplusplus
 }
 #endif

@@ -1944,8 +1944,52 @@ void draw_object(char *datacfg, char *cfgfile, char *weightfile, char *filename,
 }
 #endif // defined(OPENCV) && defined(GPU)
 
+void parse_cs_config(int *run_steps, int *save_images, int *do_beep, int *focus_window, int *send_mail, int *send_post, double *gtimer, double *mtimer, char *corefolder) {
+	FILE *cfg = fopen("custom_steps.cfg", "r");
+	char buffer[1024];
+	
+	while (fgets(buffer, 1024, cfg)) {
+		CS_DEBUG && printf("parse_cs_config - read line: %s\n", buffer);
+		if (!strncmp(buffer, "run_steps", 9)) {
+			sscanf(buffer, "run_steps %d", run_steps);
+			CS_DEBUG && printf("parse_cs_config - read run_steps as %d\n", *run_steps);
+		} else if (!strncmp(buffer, "save_images", 11)) {
+			sscanf(buffer, "save_images %d", save_images);
+			CS_DEBUG && printf("parse_cs_config - read save_images as %d\n", *save_images);
+		} else if (!strncmp(buffer, "do_beep", 7)) {
+			sscanf(buffer, "do_beep %d", do_beep);
+			CS_DEBUG && printf("parse_cs_config - read do_beep as %d\n", *do_beep);
+		} else if (!strncmp(buffer, "focus_window", 12)) {
+			sscanf(buffer, "focus_window %d", focus_window);
+			CS_DEBUG && printf("parse_cs_config - read focus_window as %d\n", *focus_window);
+		} else if (!strncmp(buffer, "send_mail", 9)) {
+			sscanf(buffer, "send_mail %d", send_mail);
+			CS_DEBUG && printf("parse_cs_config - read send_mail as %d\n", *send_mail);
+		} else if (!strncmp(buffer, "send_post", 9)) {
+			sscanf(buffer, "send_post %d", send_post);
+			CS_DEBUG && printf("parse_cs_config - read send_post as %d\n", *send_post);
+		} else if (!strncmp(buffer, "gtimer", 6)) {
+			sscanf(buffer, "gtimer %lf", gtimer);
+			CS_DEBUG && printf("parse_cs_config - read gtimer as %lf\n", *gtimer);
+		} else if (!strncmp(buffer, "mtimer", 6)) {
+			sscanf(buffer, "mtimer %lf", mtimer);
+			CS_DEBUG && printf("parse_cs_config - read mtimer as %lf\n", *mtimer);
+		} else if (!strncmp(buffer, "corefolder", 10)) {
+			sscanf(buffer, "corefolder %s", corefolder);
+			CS_DEBUG && printf("parse_cs_config - read corefolder as %s\n", corefolder);	
+		}
+	}
+	
+	fclose(cfg);
+}
+
 void run_detector(int argc, char **argv)
 {
+	int run_steps = 0, save_images = 0, do_beep = 0, focus_window = 0, send_mail = 0, send_post = 0;
+	double gtimer = .0, mtimer = .0;
+	char corefolder[CS_MAXPATH] = "";
+	parse_cs_config(&run_steps, &save_images, &do_beep, &focus_window, &send_mail, &send_post, &gtimer, &mtimer, corefolder);
+	
     int dont_show = find_arg(argc, argv, "-dont_show");
     int benchmark = find_arg(argc, argv, "-benchmark");
     int benchmark_layers = find_arg(argc, argv, "-benchmark_layers");
@@ -2035,7 +2079,8 @@ void run_detector(int argc, char **argv)
             if (strlen(filename) > 0)
                 if (filename[strlen(filename) - 1] == 0x0d) filename[strlen(filename) - 1] = 0;
         demo(cfg, weights, thresh, hier_thresh, cam_index, filename, names, classes, avgframes, frame_skip, prefix, out_filename,
-            mjpeg_port, dontdraw_bbox, json_port, dont_show, ext_output, letter_box, time_limit_sec, http_post_host, benchmark, benchmark_layers);
+             mjpeg_port, dontdraw_bbox, json_port, dont_show, ext_output, letter_box, time_limit_sec, http_post_host, benchmark, benchmark_layers,
+			 gtimer, mtimer, corefolder, run_steps, save_images, do_beep, focus_window, send_mail, send_post);
 
         free_list_contents_kvp(options);
         free_list(options);
