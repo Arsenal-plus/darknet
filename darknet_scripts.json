@@ -1,5 +1,5 @@
 {
-   "request_server" : "ya.ru",
+   "request_server" : "http://ya.ru",
    "smtp_server"    : "smtp.mail.ru",
    "smtp_port"      : 465,
    "user_login"     : "darknet_test1@mail.ru",
