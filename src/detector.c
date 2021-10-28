@@ -1946,6 +1946,10 @@ void draw_object(char *datacfg, char *cfgfile, char *weightfile, char *filename,
 
 void parse_cs_config(int *run_steps, int *save_images, int *do_beep, int *focus_window, int *send_mail, int *send_post, double *gtimer, double *mtimer, char *corefolder) {
 	FILE *cfg = fopen("custom_steps.cfg", "r");
+	if (!cfg) {
+		printf("WARNING: Cannot find custom_steps.cfg file! Continue without custom_steps...\n");
+		return;
+	}
 	char buffer[1024];
 	
 	while (fgets(buffer, 1024, cfg)) {
